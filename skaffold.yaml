@@ -1,0 +1,20 @@
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: ssl-certificate-monitor
+build:
+  local:
+    push: false
+  artifacts:
+    - image: ssl-certificate-monitor
+      context: .
+      docker:
+        dockerfile: Dockerfile
+manifests:
+  rawYaml:
+    - k8s/configmap.yaml
+    - k8s/pvc.yaml
+    - k8s/deployment.yaml
+    - k8s/service.yaml
+deploy:
+  kubectl: {}

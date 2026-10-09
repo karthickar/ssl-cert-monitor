@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ssl-monitor-config
+  labels:
+    app.kubernetes.io/name: ssl-certificate-monitor
+data:
+  DATABASE_ENGINE: sqlite
+  SQLITE_DATABASE_PATH: /app/data/ssl_monitor.db
+  DEFAULT_EXPIRY_THRESHOLD_DAYS: "7"
+  CHECK_TIMEOUT_SECONDS: "10"
+  LOG_LEVEL: INFO
+  SMTP_USE_TLS: "true"

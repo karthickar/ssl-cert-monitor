@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SSL Certificate Manager</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">SECURITY OPERATIONS</p>
+        <h1>SSL certificate manager</h1>
+        <p class="subtitle">Monitor certificate validity across public and internal services.</p>
+      </div>
+      <div class="header-actions"><button class="quiet-button" id="open-settings" type="button">Alert settings</button><button class="primary-button" id="open-add" type="button">+ Add monitor</button></div>
+    </header>
+
+    <section class="summary" aria-label="Monitor summary">
+      <div><span>{{ monitors|length }}</span><small>Monitors</small></div>
+      <div><span>{{ monitors|selectattr('status', 'equalto', 'healthy')|list|length }}</span><small>Healthy</small></div>
+      <div><span>{{ monitors|selectattr('status', 'equalto', 'expiring_soon')|list|length }}</span><small>Expiring soon</small></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div><h2>Certificate monitors</h2><p>Certificates are checked when added or when a check is requested via the API.</p></div>
+        <button class="quiet-button" id="open-add-secondary" type="button">Add URL</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Index</th><th>URL / certificate</th><th>Validity</th><th>Alert</th><th>Location</th></tr></thead>
+          <tbody>
+          {% for monitor in monitors %}
+            <tr>
+              <td class="index">{{ loop.index }}</td>
+              <td>
+                <strong>{{ monitor.name }}</strong>
+                <span class="muted">{% if monitor.kind == 'url' %}{{ monitor.hostname }}{% if monitor.port != 443 %}:{{ monitor.port }}{% endif %}{% else %}Uploaded certificate{% endif %}</span>
+              </td>
+              <td>
+                {% if monitor.expires_at %}
+                  <span class="badge {{ monitor.status }}">{{ monitor.status.replace('_', ' ') }}</span>
+                  <span class="muted">{{ monitor.days_remaining }} days remaining · {{ monitor.expires_at.strftime('%d %b %Y') }}</span>
+                {% else %}
+                  <span class="badge error">{{ monitor.status }}</span>
+                  <span class="muted">{{ monitor.last_error or 'Awaiting first check' }}</span>
+                {% endif %}
+              </td>
+              <td><label class="switch"><input type="checkbox" data-monitor-id="{{ monitor.id }}" {% if monitor.alert_enabled %}checked{% endif %}><span></span><em>{% if monitor.alert_enabled %}On{% else %}Off{% endif %}</em></label></td>
+              <td>{{ monitor.location or '—' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="empty">No monitors yet. Add a URL or upload a certificate to get started.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="add-dialog">
+    <form id="add-form">
+      <div class="dialog-heading"><div><p class="eyebrow">NEW MONITOR</p><h2>Add a URL</h2></div><button class="close" type="button" aria-label="Close">×</button></div>
+      <label>Display name<input name="name" required maxlength="120" placeholder="Production API"></label>
+      <label>HTTPS URL or hostname<input name="url" required placeholder="https://api.example.com"></label>
+      <div class="two-columns"><label>Port <input name="port" type="number" min="1" max="65535" placeholder="443"></label><label>Location <input name="location" maxlength="160" placeholder="Dubai production"></label></div>
+      <label class="checkbox"><input name="alert_enabled" type="checkbox" checked> Enable expiry alerts</label>
+      <p class="form-error" id="form-error" role="alert"></p>
+      <div class="dialog-actions"><button class="quiet-button close" type="button">Cancel</button><button class="primary-button" type="submit">Add monitor</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog">
+    <form id="settings-form">
+      <div class="dialog-heading"><div><p class="eyebrow">ALERT DELIVERY</p><h2>Notification settings</h2></div><button class="settings-close close" type="button" aria-label="Close">×</button></div>
+      <label>Alert when certificate expires within (days)<input name="expiration_threshold_days" type="number" min="1" max="365" value="{{ alert_config.expiration_threshold_days }}" required></label>
+      <label>Recipient email addresses <input name="recipient_emails" value="{{ recipient_emails|join(', ') }}" placeholder="ops@example.com, security@example.com"><span class="field-help">SMTP credentials are configured in your .env file.</span></label>
+      <label>Webhook URL <input name="webhook_url" type="url" value="{{ alert_config.webhook_url or '' }}" placeholder="https://hooks.example.com/ssl-alerts"></label>
+      <p class="form-error" id="settings-error" role="alert"></p>
+      <div class="dialog-actions"><button class="quiet-button settings-close" type="button">Cancel</button><button class="primary-button" type="submit">Save settings</button></div>
+    </form>
+  </dialog>
+
+  <script>
+    const dialog = document.querySelector('#add-dialog');
+    const settingsDialog = document.querySelector('#settings-dialog');
+    document.querySelectorAll('#open-add, #open-add-secondary').forEach(button => button.addEventListener('click', () => dialog.showModal()));
+    document.querySelectorAll('.close').forEach(button => button.addEventListener('click', () => dialog.close()));
+    document.querySelector('#open-settings').addEventListener('click', () => settingsDialog.showModal());
+    document.querySelectorAll('.settings-close').forEach(button => button.addEventListener('click', () => settingsDialog.close()));
+    document.querySelectorAll('.switch input').forEach(input => input.addEventListener('change', async () => {
+      const response = await fetch(`/api/v1/monitors/${input.dataset.monitorId}/alert`, {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({alert_enabled: input.checked})});
+      if (!response.ok) { input.checked = !input.checked; alert('Could not update the alert setting.'); return; }
+      input.parentElement.querySelector('em').textContent = input.checked ? 'On' : 'Off';
+    }));
+    document.querySelector('#add-form').addEventListener('submit', async event => {
+      event.preventDefault(); const form = new FormData(event.currentTarget);
+      const payload = {name: form.get('name'), url: form.get('url'), location: form.get('location') || null, alert_enabled: form.get('alert_enabled') === 'on'};
+      if (form.get('port')) payload.port = Number(form.get('port'));
+      const response = await fetch('/api/v1/monitors/url', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+      if (response.ok) { window.location.reload(); return; }
+      const data = await response.json(); document.querySelector('#form-error').textContent = data.detail || 'Could not add monitor.';
+    });
+    document.querySelector('#settings-form').addEventListener('submit', async event => {
+      event.preventDefault(); const form = new FormData(event.currentTarget);
+      const emails = String(form.get('recipient_emails')).split(',').map(email => email.trim()).filter(Boolean);
+      const webhook = String(form.get('webhook_url')).trim();
+      const payload = {expiration_threshold_days: Number(form.get('expiration_threshold_days')), recipient_emails: emails, webhook_url: webhook || null};
+      const response = await fetch('/api/v1/alert-config', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+      if (response.ok) { window.location.reload(); return; }
+      const data = await response.json(); document.querySelector('#settings-error').textContent = data.detail || 'Could not save alert settings.';
+    });
+  </script>
+</body>
+</html>
