@@ -7,6 +7,8 @@ A small FastAPI microservice that checks the leaf TLS certificate presented by p
 - HTTPS URL/hostname monitoring with configurable port (defaults to `443`)
 - Internal/self-signed TLS inspection: the connection retrieves the certificate without requiring a trusted chain
 - Certificate-file monitoring via upload (`.pem`, `.crt`, `.cer`, or DER content)
+- Daily background refresh of certificate validity on the dashboard
+- Google/Gmail sign-in; only the signed-in owner can add, change, or remove monitors
 - Expiry status, subject, issuer, serial number, expiry date, and remaining days
 - Configurable expiring-soon threshold (defaults to 7 days)
 - Optional JSON webhook alerting; without a webhook, alerts are written to the application log for easy local testing
@@ -32,7 +34,9 @@ docker build -t ssl-certificate-monitor .
 docker run --rm -p 8000:8000 -v "$(pwd)/data:/app/data" --name ssl-monitor ssl-certificate-monitor
 ```
 
-The database is persisted in `./data/ssl_monitor.db`. The API documentation is available at <http://localhost:8000/docs>.
+The database is persisted in `./data/ssl_monitor.db`. The dashboard is at <http://localhost:8000/ssl> and the API documentation is at <http://localhost:8000/docs>.
+
+To enable Gmail sign-in, create a Google OAuth client (Web application) and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET_KEY`, and `OAUTH_REDIRECT_URL`. Authorized redirect URI should match `OAUTH_REDIRECT_URL`, typically `http://localhost:8000/auth/google/callback`. After sign-in, monitors are stored under that Google username. For local UI testing without Google credentials, set `AUTH_ALLOW_DEV_LOGIN=true`.
 
 To change defaults, copy `.env.example` to `.env` and pass it to Docker:
 
@@ -147,10 +151,10 @@ For a one-time deployment, use `skaffold run`. To open the dashboard locally aft
 kubectl port-forward service/ssl-certificate-monitor 8000:80
 ```
 
-Then visit <http://localhost:8000/route>. Local clusters such as Docker Desktop, Minikube, or kind need a default storage class for the PVC. For production, replace the SQLite PVC with an external database and use a managed secret store.
+Then visit <http://localhost:8000/ssl>. Local clusters such as Docker Desktop, Minikube, or kind need a default storage class for the PVC. For production, replace the SQLite PVC with an external database and use a managed secret store.
 
 ## Notes
 
 - URL monitor creation attempts an immediate check. If DNS/network/TLS negotiation fails, the monitor is retained with status `error` and can be checked again later.
-- Checks are requested through `POST /api/v1/monitors/{id}/check`; a production deployment can invoke this endpoint from a scheduler or add a worker without changing monitor storage.
+- Certificate validity is refreshed on a background schedule (default every 24 hours) and written back to the dashboard. You can still request an immediate owner-only check through `POST /api/v1/monitors/{id}/check`.
 - Uploaded certificate data is stored inside the local SQLite database. Protect the database volume appropriately.

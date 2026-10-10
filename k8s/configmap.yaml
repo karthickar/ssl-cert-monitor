@@ -11,3 +11,6 @@ data:
   CHECK_TIMEOUT_SECONDS: "10"
   LOG_LEVEL: INFO
   SMTP_USE_TLS: "true"
+  CHECK_INTERVAL_HOURS: "24"
+  OAUTH_REDIRECT_URL: http://localhost:8000/auth/google/callback
+  AUTH_ALLOW_DEV_LOGIN: "false"

@@ -1,44 +1,52 @@
 import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from src.auth import get_optional_user, require_monitor_owner, require_user
 from src.database import get_db
 from src.libutil.alerts import send_alerts
 from src.libutil.certificates import inspect_pem_certificate
 from src.libutil.urls import parse_target
-from src.models import AlertConfig, Monitor
+from src.models import Monitor, User
 from src.schemas import AlertConfigResponse, AlertConfigUpdate, MonitorAlertUpdate, MonitorResponse, URLMonitorCreate
-from src.services.monitoring import check_monitor, get_alert_config, recipient_emails
+from src.services.monitoring import check_monitor, get_alert_config, recipient_emails, serialize_monitor
 
 router = APIRouter(prefix="/api/v1")
 logger = logging.getLogger(__name__)
 
 
 def _monitor_or_404(monitor_id: int, db: Session) -> Monitor:
-    monitor = db.get(Monitor, monitor_id)
+    monitor = db.query(Monitor).options(joinedload(Monitor.owner)).filter(Monitor.id == monitor_id).first()
     if not monitor:
         raise HTTPException(status_code=404, detail="Monitor not found")
     return monitor
 
 
+def _owned(monitor_id: int, db: Session, user: User) -> Monitor:
+    monitor = _monitor_or_404(monitor_id, db)
+    require_monitor_owner(monitor, user)
+    return monitor
+
+
 @router.post("/monitors/url", response_model=MonitorResponse, status_code=status.HTTP_201_CREATED)
-def create_url_monitor(payload: URLMonitorCreate, db: Session = Depends(get_db)):
+def create_url_monitor(payload: URLMonitorCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     try:
         hostname, port = parse_target(payload.url, payload.port)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     monitor = Monitor(name=payload.name, kind="url", hostname=hostname, port=port,
-                      location=payload.location, alert_enabled=payload.alert_enabled)
+                      location=payload.location, alert_enabled=payload.alert_enabled, owner_id=user.id)
     db.add(monitor)
     db.commit()
     db.refresh(monitor)
-    return check_monitor(db, monitor)
+    return serialize_monitor(check_monitor(db, monitor), user)
 
 
 @router.post("/monitors/certificate", response_model=MonitorResponse, status_code=status.HTTP_201_CREATED)
 async def upload_certificate_monitor(name: str, location: str | None = None, alert_enabled: bool = True,
-                                     certificate: UploadFile = File(...), db: Session = Depends(get_db)):
+                                     certificate: UploadFile = File(...), db: Session = Depends(get_db),
+                                     user: User = Depends(require_user)):
     if not certificate.filename:
         raise HTTPException(status_code=422, detail="A certificate file is required")
     content = await certificate.read()
@@ -49,40 +57,42 @@ async def upload_certificate_monitor(name: str, location: str | None = None, ale
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     monitor = Monitor(name=name, kind="uploaded_certificate", certificate_pem=pem,
-                      location=location, alert_enabled=alert_enabled)
+                      location=location, alert_enabled=alert_enabled, owner_id=user.id)
     db.add(monitor)
     db.commit()
     db.refresh(monitor)
-    return check_monitor(db, monitor)
+    return serialize_monitor(check_monitor(db, monitor), user)
 
 
 @router.get("/monitors", response_model=list[MonitorResponse])
-def list_monitors(db: Session = Depends(get_db)):
-    return db.query(Monitor).order_by(Monitor.id.desc()).all()
+def list_monitors(db: Session = Depends(get_db), user: User | None = Depends(get_optional_user)):
+    monitors = db.query(Monitor).options(joinedload(Monitor.owner)).order_by(Monitor.id.desc()).all()
+    return [serialize_monitor(monitor, user) for monitor in monitors]
 
 
 @router.get("/monitors/{monitor_id}", response_model=MonitorResponse)
-def get_monitor(monitor_id: int, db: Session = Depends(get_db)):
-    return _monitor_or_404(monitor_id, db)
+def get_monitor(monitor_id: int, db: Session = Depends(get_db), user: User | None = Depends(get_optional_user)):
+    return serialize_monitor(_monitor_or_404(monitor_id, db), user)
 
 
 @router.post("/monitors/{monitor_id}/check", response_model=MonitorResponse)
-def check_single_monitor(monitor_id: int, db: Session = Depends(get_db)):
-    return check_monitor(db, _monitor_or_404(monitor_id, db))
+def check_single_monitor(monitor_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return serialize_monitor(check_monitor(db, _owned(monitor_id, db, user)), user)
 
 
 @router.patch("/monitors/{monitor_id}/alert", response_model=MonitorResponse)
-def update_monitor_alert(monitor_id: int, payload: MonitorAlertUpdate, db: Session = Depends(get_db)):
-    monitor = _monitor_or_404(monitor_id, db)
+def update_monitor_alert(monitor_id: int, payload: MonitorAlertUpdate, db: Session = Depends(get_db),
+                         user: User = Depends(require_user)):
+    monitor = _owned(monitor_id, db, user)
     monitor.alert_enabled = payload.alert_enabled
     db.commit()
     db.refresh(monitor)
-    return monitor
+    return serialize_monitor(monitor, user)
 
 
 @router.delete("/monitors/{monitor_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_monitor(monitor_id: int, db: Session = Depends(get_db)):
-    db.delete(_monitor_or_404(monitor_id, db))
+def delete_monitor(monitor_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    db.delete(_owned(monitor_id, db, user))
     db.commit()
 
 
@@ -94,7 +104,7 @@ def read_alert_config(db: Session = Depends(get_db)):
 
 
 @router.put("/alert-config", response_model=AlertConfigResponse)
-def update_alert_config(payload: AlertConfigUpdate, db: Session = Depends(get_db)):
+def update_alert_config(payload: AlertConfigUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     config = get_alert_config(db)
     config.expiration_threshold_days = payload.expiration_threshold_days
     config.webhook_url = str(payload.webhook_url) if payload.webhook_url else None
@@ -106,7 +116,7 @@ def update_alert_config(payload: AlertConfigUpdate, db: Session = Depends(get_db
 
 
 @router.post("/alert-config/test")
-def test_alert(db: Session = Depends(get_db)):
+def test_alert(db: Session = Depends(get_db), user: User = Depends(require_user)):
     config = get_alert_config(db)
     delivered = send_alerts(config.webhook_url, recipient_emails(config), {
         "event": "ssl_monitor_test", "name": "Test certificate", "hostname": "example.internal",

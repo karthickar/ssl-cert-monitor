@@ -29,8 +29,25 @@ class MonitorResponse(BaseModel):
     days_remaining: int | None
     last_checked_at: datetime | None
     created_at: datetime
+    owner_id: int | None = None
+    owner_email: str | None = None
+    can_manage: bool = False
 
     model_config = {"from_attributes": True}
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    name: str
+    picture: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class DevLoginRequest(BaseModel):
+    email: str = Field(default="tester@gmail.com", min_length=5, max_length=255)
+    name: str = Field(default="Test User", min_length=1, max_length=160)
 
 
 class AlertConfigUpdate(BaseModel):

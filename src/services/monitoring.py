@@ -5,9 +5,11 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from src.config import get_settings
+from src.database import SessionLocal
 from src.libutil.alerts import send_alerts
 from src.libutil.certificates import CertificateDetails, fetch_server_certificate, inspect_pem_certificate
-from src.models import AlertConfig, Monitor
+from src.models import AlertConfig, Monitor, User
+from src.schemas import MonitorResponse
 
 logger = logging.getLogger(__name__)
 
@@ -67,3 +69,29 @@ def check_monitor(db: Session, monitor: Monitor) -> Monitor:
     db.commit()
     db.refresh(monitor)
     return monitor
+
+
+def check_all_monitors() -> int:
+    """Refresh every stored monitor so dashboard validity stays current."""
+    db = SessionLocal()
+    try:
+        monitors = db.query(Monitor).order_by(Monitor.id.asc()).all()
+        for monitor in monitors:
+            check_monitor(db, monitor)
+        logger.info("Daily certificate refresh completed for %s monitors", len(monitors))
+        return len(monitors)
+    finally:
+        db.close()
+
+
+def can_manage_monitor(monitor: Monitor, user: User | None) -> bool:
+    if user is None:
+        return False
+    return monitor.owner_id is None or monitor.owner_id == user.id
+
+
+def serialize_monitor(monitor: Monitor, user: User | None = None) -> MonitorResponse:
+    return MonitorResponse.model_validate(monitor).model_copy(update={
+        "owner_email": monitor.owner.email if monitor.owner else None,
+        "can_manage": can_manage_monitor(monitor, user),
+    })

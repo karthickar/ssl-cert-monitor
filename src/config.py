@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_from_email: str | None = None
     smtp_use_tls: bool = True
+    session_secret_key: str = "change-me-in-production"
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    oauth_redirect_url: str | None = None
+    check_interval_hours: int = Field(default=24, ge=1, le=168)
+    disable_scheduler: bool = False
+    auth_allow_dev_login: bool = False
 
     @property
     def resolved_database_url(self) -> str:
