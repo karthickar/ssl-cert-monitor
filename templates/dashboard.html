@@ -4,31 +4,48 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SSL Certificate Manager</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v=7">
 </head>
 <body>
+  {% macro google_button(extra_class='') %}
+    <a class="google-button {{ extra_class }}" href="/auth/google">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.4c-.3 1.5-1.2 2.8-2.5 3.6v3h4.1c2.4-2.2 3.5-5.4 3.5-8.7z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-4.1-3c-1.1.8-2.5 1.2-3.9 1.2-3 0-5.6-2-6.5-4.8H1.3v3.1C3.3 21.3 7.4 24 12 24z"/><path fill="#FBBC05" d="M5.5 14.5c-.2-.7-.4-1.4-.4-2.1s.1-1.4.4-2.1V7.2H1.3C.5 8.7 0 10.3 0 12s.5 3.3 1.3 4.8l4.2-2.3z"/><path fill="#EA4335" d="M12 4.8c1.7 0 3.3.6 4.5 1.7l3.4-3.4C18 1.1 15.2 0 12 0 7.4 0 3.3 2.7 1.3 7.2l4.2 3.1C6.4 6.8 9 4.8 12 4.8z"/></svg>
+      Sign in with Gmail
+    </a>
+  {% endmacro %}
+
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <p class="eyebrow">SECURITY OPERATIONS</p>
-        <h1>SSL monitor</h1>
+        <span class="brand-mark">SSL</span>
+        <div>
+          <p class="eyebrow">Certificate monitor</p>
+          <strong>Operations</strong>
+        </div>
       </div>
-      <nav class="nav" aria-label="Workspace">
-        <a class="nav-item active" href="#dashboard" data-pane="dashboard">Dashboard</a>
-        <a class="nav-item" href="#add-url" data-pane="add-url">Monitor a URL</a>
-        <a class="nav-item" href="#upload" data-pane="upload">Upload a certificate</a>
-        <a class="nav-item" href="#manage" data-pane="manage">Remove monitors</a>
-        <a class="nav-item" href="#alerts" data-pane="alerts">Alert settings</a>
-        <a class="nav-item" href="#account" data-pane="account">Account</a>
+
+      <p class="nav-label">Manage</p>
+      <nav class="nav" aria-label="Operations">
+        <a class="nav-item active" href="#dashboard" data-pane="dashboard"><span class="nav-icon">▦</span> Dashboard</a>
+        <a class="nav-item" href="#add-url" data-pane="add-url"><span class="nav-icon">＋</span> Add URL</a>
+        <a class="nav-item" href="#upload" data-pane="upload"><span class="nav-icon">↑</span> Upload certificate</a>
+        <a class="nav-item" href="#alerts" data-pane="alerts"><span class="nav-icon">⚑</span> Alert settings</a>
       </nav>
-      <div class="sidebar-user">
+
+      <div class="sidebar-account">
+        <p class="nav-label">Account</p>
         {% if current_user %}
-          <strong>{{ current_user.name }}</strong>
-          <span>{{ current_user.email }}</span>
-          <a class="quiet-button" href="/auth/logout">Sign out</a>
+          <div class="signed-in">
+            <span class="avatar">{{ current_user.name[:1] }}</span>
+            <div>
+              <strong>{{ current_user.name }}</strong>
+              <small>{{ current_user.email }}</small>
+            </div>
+          </div>
+          <a class="ghost-button" href="/auth/logout">Sign out</a>
         {% else %}
-          <strong>Not signed in</strong>
-          <span>Sign in to add or remove monitors.</span>
+          <p class="sidebar-hint">Gmail sign-in is optional. Anyone can add or remove URL monitors.</p>
+          {{ google_button() }}
         {% endif %}
       </div>
     </aside>
@@ -36,20 +53,13 @@
     <main class="workspace">
       <header class="topbar">
         <div>
-          <p class="eyebrow" id="pane-eyebrow">CERTIFICATE VALIDITY</p>
-          <h2 id="pane-title">Dashboard</h2>
-          <p class="subtitle" id="pane-subtitle">Validity is refreshed automatically every {{ check_interval_hours }} hours.</p>
-        </div>
-        <div class="header-actions">
-          {% if current_user %}
-            <span class="user-chip">{{ current_user.email }}</span>
-          {% elif google_oauth_configured %}
-            <a class="primary-button" href="/auth/google">Sign in with Google</a>
-          {% endif %}
+          <p class="eyebrow" id="pane-eyebrow">Overview</p>
+          <h1 id="pane-title">Dashboard</h1>
+          <p class="subtitle" id="pane-subtitle">Certificate validity is refreshed every {{ check_interval_hours }} hours.</p>
         </div>
       </header>
 
-      <section class="summary" aria-label="Monitor summary">
+      <section class="summary" id="summary" aria-label="Monitor summary">
         <div><span>{{ monitors|length }}</span><small>Monitors</small></div>
         <div><span>{{ monitors|selectattr('status', 'equalto', 'healthy')|list|length }}</span><small>Healthy</small></div>
         <div><span>{{ monitors|selectattr('status', 'equalto', 'expiring_soon')|list|length }}</span><small>Expiring soon</small></div>
@@ -60,12 +70,12 @@
           <div class="panel-heading">
             <div>
               <h2>Certificate monitors</h2>
-              <p>URL and uploaded certificates stay current through the daily validity check.</p>
+              <p>Owner is {{ default_owner }}. Location is the country you are operating from.</p>
             </div>
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Index</th><th>URL / certificate</th><th>Validity</th><th>Owner</th><th>Last checked</th><th>Location</th></tr></thead>
+              <thead><tr><th>#</th><th>URL / certificate</th><th>Validity</th><th>Owner</th><th>Location</th><th>Alert</th><th>Last checked</th><th></th></tr></thead>
               <tbody>
               {% for monitor in monitors %}
                 <tr>
@@ -77,18 +87,29 @@
                   <td>
                     {% if monitor.expires_at %}
                       <span class="badge {{ monitor.status }}">{{ monitor.status.replace('_', ' ') }}</span>
-                      <span class="muted">{{ monitor.days_remaining }} days remaining · {{ monitor.expires_at.strftime('%d %b %Y') }}</span>
+                      <span class="muted">{{ monitor.days_remaining }} days · {{ monitor.expires_at.strftime('%d %b %Y') }}</span>
                     {% else %}
                       <span class="badge error">{{ monitor.status }}</span>
                       <span class="muted">{{ monitor.last_error or 'Awaiting first check' }}</span>
                     {% endif %}
                   </td>
-                  <td>{{ monitor.owner.email if monitor.owner else '—' }}</td>
+                  <td>{{ default_owner }}</td>
+                  <td>{{ monitor.location or detected_country }}</td>
+                  <td>
+                    {% if monitor.alert_enabled %}
+                      <span class="badge healthy">On</span>
+                      <span class="muted">{{ monitor.alert_threshold_days or alert_config.expiration_threshold_days }} days{% if monitor.alert_recipient_emails %} · {{ monitor.alert_recipient_emails }}{% endif %}</span>
+                    {% else %}
+                      <span class="muted">Off</span>
+                    {% endif %}
+                  </td>
                   <td class="muted">{{ monitor.last_checked_at.strftime('%d %b %Y %H:%M') if monitor.last_checked_at else '—' }}</td>
-                  <td>{{ monitor.location or '—' }}</td>
+                  <td>
+                    <button class="danger-button" type="button" data-delete-id="{{ monitor.id }}" data-delete-name="{{ monitor.name }}">Remove</button>
+                  </td>
                 </tr>
               {% else %}
-                <tr><td colspan="6" class="empty">No monitors yet. Sign in, then add a URL or upload a certificate.</td></tr>
+                <tr><td colspan="8" class="empty">No monitors yet. Use Add URL or Upload certificate in the left menu.</td></tr>
               {% endfor %}
               </tbody>
             </table>
@@ -96,144 +117,149 @@
         </div>
       </section>
 
-      <section class="pane" data-pane="add-url" data-requires-auth="true">
+      <section class="pane" data-pane="add-url">
         <div class="panel form-panel">
-          <div class="panel-heading"><div><h2>Monitor a URL</h2><p>Check the leaf TLS certificate presented by an HTTPS service.</p></div></div>
+          <div class="panel-heading"><div><h2>Add a URL</h2><p>Monitor the leaf TLS certificate on an HTTPS service.</p></div></div>
           <form id="add-form" class="workspace-form">
             <label>Display name<input name="name" required maxlength="120" placeholder="Production API"></label>
             <label>HTTPS URL or hostname<input name="url" required placeholder="https://api.example.com"></label>
-            <div class="two-columns"><label>Port <input name="port" type="number" min="1" max="65535" placeholder="443"></label><label>Location <input name="location" maxlength="160" placeholder="Dubai production"></label></div>
-            <label class="checkbox"><input name="alert_enabled" type="checkbox" checked> Enable expiry alerts</label>
+            <div class="two-columns">
+              <label>Port <input name="port" type="number" min="1" max="65535" placeholder="443"></label>
+              <label>Location <input name="location" maxlength="160" value="{{ detected_country }}" readonly></label>
+            </div>
+            <p class="field-help">Owner is stored as {{ default_owner }}. Location is the country you are trying from. Use Alert settings to enable expiry alerts.</p>
             <p class="form-error" id="form-error" role="alert"></p>
-            <div class="dialog-actions"><button class="primary-button" type="submit">Add URL monitor</button></div>
+            <div class="form-actions"><button class="primary-button" type="submit">Add URL monitor</button></div>
           </form>
         </div>
       </section>
 
-      <section class="pane" data-pane="upload" data-requires-auth="true">
+      <section class="pane" data-pane="upload">
         <div class="panel form-panel">
-          <div class="panel-heading"><div><h2>Upload a certificate</h2><p>Track a PEM, CRT, CER, or DER file without connecting to a live URL.</p></div></div>
+          <div class="panel-heading"><div><h2>Upload a certificate</h2><p>Track a PEM, CRT, CER, or DER file without a live URL.</p></div></div>
           <form id="upload-form" class="workspace-form">
             <label>Display name<input name="name" required maxlength="120" placeholder="VPN certificate"></label>
             <label>Certificate file<input name="certificate" type="file" required accept=".pem,.crt,.cer,.der,application/x-x509-ca-cert,application/pkix-cert"></label>
-            <label>Location <input name="location" maxlength="160" placeholder="Office firewall"></label>
-            <label class="checkbox"><input name="alert_enabled" type="checkbox" checked> Enable expiry alerts</label>
+            <label>Location <input name="location" maxlength="160" value="{{ detected_country }}" readonly></label>
+            <p class="field-help">Owner is stored as {{ default_owner }}. Location is the country you are trying from. Use Alert settings to enable expiry alerts.</p>
             <p class="form-error" id="upload-error" role="alert"></p>
-            <div class="dialog-actions"><button class="primary-button" type="submit">Upload certificate</button></div>
+            <div class="form-actions"><button class="primary-button" type="submit">Upload certificate</button></div>
           </form>
         </div>
       </section>
 
-      <section class="pane" data-pane="manage" data-requires-auth="true">
-        <div class="panel">
-          <div class="panel-heading"><div><h2>Remove monitors</h2><p>Only monitors you created can be changed or deleted.</p></div></div>
+      <section class="pane" data-pane="alerts">
+        <div class="panel" id="alert-list-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Alert settings</h2>
+              <p>Email and webhook are sent when remaining days equal the saved threshold, and again at 7 days and 1 day before expiry.</p>
+            </div>
+            <button class="primary-button" id="add-alert" type="button">Add a new alerting</button>
+          </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>URL / certificate</th><th>Validity</th><th>Alert</th><th>Action</th></tr></thead>
+              <thead><tr><th>Certificate</th><th>Threshold</th><th>Email</th><th>Webhook</th><th></th></tr></thead>
               <tbody>
-              {% for monitor in monitors %}
+              {% for monitor in monitors if monitor.alert_enabled %}
                 <tr>
                   <td>
                     <strong>{{ monitor.name }}</strong>
-                    <span class="muted">{% if monitor.kind == 'url' %}{{ monitor.hostname }}{% if monitor.port != 443 %}:{{ monitor.port }}{% endif %}{% else %}Uploaded certificate{% endif %}</span>
+                    <span class="muted">{% if monitor.kind == 'url' %}{{ monitor.hostname }}{% else %}Uploaded certificate{% endif %} · {{ monitor.days_remaining if monitor.days_remaining is not none else '—' }} days left</span>
                   </td>
-                  <td>
-                    {% if monitor.expires_at %}
-                      <span class="badge {{ monitor.status }}">{{ monitor.status.replace('_', ' ') }}</span>
-                      <span class="muted">{{ monitor.days_remaining }} days remaining</span>
-                    {% else %}
-                      <span class="badge error">{{ monitor.status }}</span>
-                    {% endif %}
-                  </td>
-                  <td>
-                    {% if can_manage_monitor(monitor, current_user) %}
-                      <label class="switch"><input type="checkbox" data-monitor-id="{{ monitor.id }}" {% if monitor.alert_enabled %}checked{% endif %}><span></span><em>{% if monitor.alert_enabled %}On{% else %}Off{% endif %}</em></label>
-                    {% else %}
-                      <span class="muted">{% if monitor.alert_enabled %}On{% else %}Off{% endif %}</span>
-                    {% endif %}
-                  </td>
-                  <td>
-                    {% if can_manage_monitor(monitor, current_user) %}
-                      <button class="danger-button" type="button" data-delete-id="{{ monitor.id }}" data-delete-name="{{ monitor.name }}">Remove</button>
-                    {% else %}
-                      <span class="muted">View only</span>
-                    {% endif %}
-                  </td>
+                  <td>{{ monitor.alert_threshold_days or alert_config.expiration_threshold_days }} days</td>
+                  <td>{{ monitor.alert_recipient_emails or '—' }}</td>
+                  <td class="muted">{{ monitor.alert_webhook_url or '—' }}</td>
+                  <td><button class="ghost-button" type="button" data-edit-alert="{{ monitor.id }}">Edit</button></td>
                 </tr>
               {% else %}
-                <tr><td colspan="4" class="empty">Nothing to manage yet.</td></tr>
+                <tr><td colspan="5" class="empty">No alerts yet. Click Add a new alerting to create a URL or certificate monitor, then save its alert.</td></tr>
               {% endfor %}
               </tbody>
             </table>
           </div>
         </div>
-      </section>
 
-      <section class="pane" data-pane="alerts" data-requires-auth="true">
-        <div class="panel form-panel">
-          <div class="panel-heading"><div><h2>Notification settings</h2><p>SMTP credentials stay in your environment file.</p></div></div>
-          <form id="settings-form" class="workspace-form">
-            <label>Alert when certificate expires within (days)<input name="expiration_threshold_days" type="number" min="1" max="365" value="{{ alert_config.expiration_threshold_days }}" required></label>
-            <label>Recipient email addresses <input name="recipient_emails" value="{{ recipient_emails|join(', ') }}" placeholder="ops@example.com, security@example.com"><span class="field-help">SMTP credentials are configured in your .env file.</span></label>
-            <label>Webhook URL <input name="webhook_url" type="url" value="{{ alert_config.webhook_url or '' }}" placeholder="https://hooks.example.com/ssl-alerts"></label>
-            <p class="form-error" id="settings-error" role="alert"></p>
-            <div class="dialog-actions"><button class="primary-button" type="submit">Save settings</button></div>
-          </form>
-        </div>
-      </section>
-
-      <section class="pane" data-pane="account">
-        <div class="panel form-panel">
-          <div class="panel-heading"><div><h2>Account</h2><p>Monitors you add are stored under your Google username.</p></div></div>
-          <div class="account-card">
-            {% if current_user %}
-              <p>Signed in as <strong>{{ current_user.name }}</strong> ({{ current_user.email }}).</p>
-              <a class="quiet-button" href="/auth/logout">Sign out</a>
-            {% else %}
-              <p>Sign in with Google to add a URL, upload a certificate, or remove monitoring.</p>
-              {% if google_oauth_configured %}
-                <a class="primary-button" href="/auth/google">Sign in with Google</a>
+        <div class="panel form-panel" id="alert-editor-panel" hidden>
+          <div class="panel-heading">
+            <div>
+              <h2 id="alert-editor-title">Add a new alerting</h2>
+              <p>Create a monitor first if needed, then save email and webhook settings for that certificate.</p>
+            </div>
+            <button class="ghost-button" id="alert-back" type="button">Back to alerts</button>
+          </div>
+          <div class="workspace-form">
+            <div id="alert-create-step">
+              {% if monitors %}
+                <label>Certificate to alert on
+                  <select id="alert-monitor">
+                    <option value="">Select a certificate…</option>
+                    {% for monitor in monitors %}
+                      <option value="{{ monitor.id }}"
+                        data-alert-enabled="{{ 'true' if monitor.alert_enabled else 'false' }}"
+                        data-threshold="{{ monitor.alert_threshold_days or alert_config.expiration_threshold_days }}"
+                        data-emails="{{ monitor.alert_recipient_emails or '' }}"
+                        data-webhook="{{ monitor.alert_webhook_url or '' }}"
+                        data-label="{{ monitor.name }}">
+                        {{ monitor.name }} — {% if monitor.kind == 'url' %}{{ monitor.hostname }}{% else %}uploaded certificate{% endif %}{% if monitor.alert_enabled %} (alert on){% endif %}
+                      </option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% else %}
+                <p class="muted">No certificates are monitored yet. Create a URL or upload a certificate first.</p>
               {% endif %}
-              {% if dev_login_enabled %}
-                <form id="dev-login-form" class="workspace-form">
-                  <label>Gmail address<input name="email" type="email" required value="tester@gmail.com"></label>
-                  <label>Display name<input name="name" required value="Test User"></label>
-                  <p class="form-error" id="dev-login-error" role="alert"></p>
-                  <button class="primary-button" type="submit">Continue with Gmail (local)</button>
+              <div id="alert-create-options">
+                <p class="nav-label">Create a monitor first</p>
+                <div class="choice-row">
+                  <button class="ghost-button" type="button" data-alert-create="url">Monitor a URL</button>
+                  <button class="ghost-button" type="button" data-alert-create="upload">Upload a certificate</button>
+                </div>
+                <form id="alert-url-form" class="nested-form" hidden>
+                  <label>Display name<input name="name" required maxlength="120" placeholder="Production API"></label>
+                  <label>HTTPS URL or hostname<input name="url" required placeholder="https://api.example.com"></label>
+                  <div class="two-columns">
+                    <label>Port <input name="port" type="number" min="1" max="65535" placeholder="443"></label>
+                    <label>Location <input name="location" maxlength="160" value="{{ detected_country }}" readonly></label>
+                  </div>
+                  <p class="form-error" id="alert-url-error" role="alert"></p>
+                  <button class="primary-button" type="submit">Save URL monitor</button>
                 </form>
-              {% elif not google_oauth_configured %}
-                <p class="muted">Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to enable Gmail sign-in.</p>
-              {% endif %}
-            {% endif %}
+                <form id="alert-upload-form" class="nested-form" hidden>
+                  <label>Display name<input name="name" required maxlength="120" placeholder="VPN certificate"></label>
+                  <label>Certificate file<input name="certificate" type="file" required accept=".pem,.crt,.cer,.der,application/x-x509-ca-cert,application/pkix-cert"></label>
+                  <label>Location <input name="location" maxlength="160" value="{{ detected_country }}" readonly></label>
+                  <p class="form-error" id="alert-upload-error" role="alert"></p>
+                  <button class="primary-button" type="submit">Save certificate monitor</button>
+                </form>
+              </div>
+            </div>
+
+            <form id="settings-form" hidden>
+              <p class="muted" id="alert-selected-label"></p>
+              <label class="checkbox"><input name="alert_enabled" type="checkbox" checked> Enable expiry alerts for this certificate</label>
+              <label>Alert when remaining days equal this threshold<input name="expiration_threshold_days" type="number" min="1" max="365" value="{{ alert_config.expiration_threshold_days }}" required></label>
+              <p class="field-help">Email and webhook are sent when validity equals this threshold, and again at 7 days and 1 day before expiry.</p>
+              <label>Recipient email addresses <input name="recipient_emails" placeholder="ops@example.com, security@example.com"></label>
+              <label>Webhook URL <input name="webhook_url" placeholder="https://hooks.example.com/ssl-alerts"></label>
+              <p class="form-error" id="settings-error" role="alert"></p>
+              <div class="form-actions">
+                <button class="ghost-button" id="alert-cancel" type="button">Cancel</button>
+                <button class="primary-button" type="submit">Save alert for this certificate</button>
+              </div>
+            </form>
           </div>
         </div>
       </section>
     </main>
   </div>
 
-  <div class="auth-gate" id="auth-gate" hidden>
-    <div class="panel form-panel">
-      <h2>Sign in required</h2>
-      <p>Only a signed-in Google user can add, change, or remove certificate monitoring.</p>
-      {% if google_oauth_configured %}
-        <a class="primary-button" href="/auth/google">Sign in with Google</a>
-      {% elif dev_login_enabled %}
-        <a class="primary-button" href="#account">Open account sign-in</a>
-      {% else %}
-        <p class="muted">Ask an administrator to configure Google sign-in.</p>
-      {% endif %}
-    </div>
-  </div>
-
   <script>
-    const signedIn = {{ 'true' if current_user else 'false' }};
     const titles = {
-      dashboard: ['CERTIFICATE VALIDITY', 'Dashboard', 'Validity is refreshed automatically every {{ check_interval_hours }} hours.'],
-      'add-url': ['NEW MONITOR', 'Monitor a URL', 'Add an HTTPS hostname and we will keep its certificate validity up to date.'],
-      upload: ['NEW MONITOR', 'Upload a certificate', 'Use this when you have a certificate file instead of a live URL.'],
-      manage: ['YOUR MONITORS', 'Remove monitors', 'Delete a URL or uploaded certificate that you created.'],
-      alerts: ['ALERT DELIVERY', 'Notification settings', 'Choose when expiry alerts are sent and where they go.'],
-      account: ['IDENTITY', 'Account', 'Manage monitoring under your Gmail username.']
+      dashboard: ['Overview', 'Dashboard', 'Certificate validity is refreshed every {{ check_interval_hours }} hours.'],
+      'add-url': ['Operations', 'Add a URL', 'Enter an HTTPS hostname. We keep its certificate validity up to date.'],
+      upload: ['Operations', 'Upload a certificate', 'Use this when you have a certificate file instead of a live URL.'],
+      alerts: ['Operations', 'Alert settings', 'Click an alert to edit it, or add a new alerting. Notifications go out at the saved threshold, 7 days, and 1 day before expiry.']
     };
     function errorText(data) {
       if (!data) return 'Request failed';
@@ -249,61 +275,154 @@
       document.querySelector('#pane-eyebrow').textContent = eyebrow;
       document.querySelector('#pane-title').textContent = title;
       document.querySelector('#pane-subtitle').textContent = subtitle;
-      const active = document.querySelector(`.pane[data-pane="${pane}"]`);
-      const gate = document.querySelector('#auth-gate');
-      const needsAuth = active && active.dataset.requiresAuth === 'true' && !signedIn;
-      gate.hidden = !needsAuth;
+      document.querySelector('#summary').hidden = pane !== 'dashboard';
     }
     window.addEventListener('hashchange', () => showPane(location.hash.slice(1)));
     showPane(location.hash.slice(1) || 'dashboard');
 
-    document.querySelectorAll('.switch input').forEach(input => input.addEventListener('change', async () => {
-      const response = await fetch(`/api/v1/monitors/${input.dataset.monitorId}/alert`, {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({alert_enabled: input.checked})});
-      if (!response.ok) { input.checked = !input.checked; alert('Could not update the alert setting.'); return; }
-      input.parentElement.querySelector('em').textContent = input.checked ? 'On' : 'Off';
-    }));
     document.querySelectorAll('[data-delete-id]').forEach(button => button.addEventListener('click', async () => {
       if (!confirm(`Remove monitoring for ${button.dataset.deleteName}?`)) return;
       const response = await fetch(`/api/v1/monitors/${button.dataset.deleteId}`, {method: 'DELETE'});
-      if (response.ok) { window.location.hash = '#manage'; window.location.reload(); return; }
+      if (response.ok) { window.location.hash = '#dashboard'; window.location.reload(); return; }
       alert('Could not remove this monitor.');
     }));
-    document.querySelector('#add-form').addEventListener('submit', async event => {
-      event.preventDefault(); const form = new FormData(event.currentTarget);
-      const payload = {name: form.get('name'), url: form.get('url'), location: form.get('location') || null, alert_enabled: form.get('alert_enabled') === 'on'};
+    async function createUrlMonitor(form, errorNode, stayOnAlerts) {
+      const payload = {name: form.get('name'), url: form.get('url'), location: form.get('location') || null, alert_enabled: Boolean(stayOnAlerts)};
       if (form.get('port')) payload.port = Number(form.get('port'));
       const response = await fetch('/api/v1/monitors/url', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
-      if (response.ok) { window.location.hash = '#dashboard'; window.location.reload(); return; }
-      const data = await response.json(); document.querySelector('#form-error').textContent = errorText(data);
-    });
-    document.querySelector('#upload-form').addEventListener('submit', async event => {
-      event.preventDefault(); const form = new FormData(event.currentTarget);
-      const query = new URLSearchParams({name: form.get('name'), alert_enabled: form.get('alert_enabled') === 'on'});
+      if (response.ok) {
+        const created = await response.json();
+        if (stayOnAlerts) sessionStorage.setItem('openAlertEditor', String(created.id));
+        window.location.hash = stayOnAlerts ? '#alerts' : '#dashboard';
+        window.location.reload();
+        return;
+      }
+      const data = await response.json();
+      errorNode.textContent = errorText(data);
+    }
+    async function createCertificateMonitor(form, errorNode, stayOnAlerts) {
+      const query = new URLSearchParams({name: form.get('name'), alert_enabled: stayOnAlerts ? 'true' : 'false'});
       if (form.get('location')) query.set('location', form.get('location'));
       const body = new FormData();
       body.append('certificate', form.get('certificate'));
       const response = await fetch(`/api/v1/monitors/certificate?${query}`, {method: 'POST', body});
-      if (response.ok) { window.location.hash = '#dashboard'; window.location.reload(); return; }
-      const data = await response.json(); document.querySelector('#upload-error').textContent = errorText(data);
-    });
-    document.querySelector('#settings-form').addEventListener('submit', async event => {
-      event.preventDefault(); const form = new FormData(event.currentTarget);
-      const emails = String(form.get('recipient_emails')).split(',').map(email => email.trim()).filter(Boolean);
-      const webhook = String(form.get('webhook_url')).trim();
-      const payload = {expiration_threshold_days: Number(form.get('expiration_threshold_days')), recipient_emails: emails, webhook_url: webhook || null};
-      const response = await fetch('/api/v1/alert-config', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
-      if (response.ok) { window.location.reload(); return; }
-      const data = await response.json(); document.querySelector('#settings-error').textContent = errorText(data);
-    });
-    const devLogin = document.querySelector('#dev-login-form');
-    if (devLogin) {
-      devLogin.addEventListener('submit', async event => {
-        event.preventDefault(); const form = new FormData(event.currentTarget);
-        const response = await fetch('/auth/dev-login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email: form.get('email'), name: form.get('name')})});
-        if (response.ok) { window.location.reload(); return; }
-        const data = await response.json(); document.querySelector('#dev-login-error').textContent = errorText(data);
-      });
+      if (response.ok) {
+        const created = await response.json();
+        if (stayOnAlerts) sessionStorage.setItem('openAlertEditor', String(created.id));
+        window.location.hash = stayOnAlerts ? '#alerts' : '#dashboard';
+        window.location.reload();
+        return;
+      }
+      const data = await response.json();
+      errorNode.textContent = errorText(data);
     }
+    document.querySelector('#add-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      await createUrlMonitor(new FormData(event.currentTarget), document.querySelector('#form-error'), false);
+    });
+    document.querySelector('#upload-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      await createCertificateMonitor(new FormData(event.currentTarget), document.querySelector('#upload-error'), false);
+    });
+    document.querySelectorAll('[data-alert-create]').forEach(button => button.addEventListener('click', () => {
+      const kind = button.dataset.alertCreate;
+      document.querySelector('#alert-url-form').hidden = kind !== 'url';
+      document.querySelector('#alert-upload-form').hidden = kind !== 'upload';
+    }));
+    document.querySelector('#alert-url-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      await createUrlMonitor(new FormData(event.currentTarget), document.querySelector('#alert-url-error'), true);
+    });
+    document.querySelector('#alert-upload-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      await createCertificateMonitor(new FormData(event.currentTarget), document.querySelector('#alert-upload-error'), true);
+    });
+    const alertSelect = document.querySelector('#alert-monitor');
+    const settingsForm = document.querySelector('#settings-form');
+    const createStep = document.querySelector('#alert-create-step');
+    const createOptions = document.querySelector('#alert-create-options');
+    const listPanel = document.querySelector('#alert-list-panel');
+    const editorPanel = document.querySelector('#alert-editor-panel');
+    function showAlertList() {
+      editorPanel.hidden = true;
+      listPanel.hidden = false;
+      if (alertSelect) alertSelect.value = '';
+      settingsForm.hidden = true;
+      createStep.hidden = false;
+      createOptions.hidden = false;
+    }
+    function showAlertEditor(mode) {
+      listPanel.hidden = true;
+      editorPanel.hidden = false;
+      document.querySelector('#alert-editor-title').textContent = mode === 'edit' ? 'Edit alert' : 'Add a new alerting';
+    }
+    function fillAlertForm(option) {
+      if (!option || !option.value) {
+        settingsForm.hidden = true;
+        createStep.hidden = false;
+        createOptions.hidden = false;
+        return;
+      }
+      createStep.hidden = true;
+      createOptions.hidden = true;
+      settingsForm.hidden = false;
+      document.querySelector('#alert-selected-label').textContent = `Alert for ${option.dataset.label || option.textContent.trim()}`;
+      settingsForm.alert_enabled.checked = true;
+      settingsForm.expiration_threshold_days.value = option.dataset.threshold || '{{ alert_config.expiration_threshold_days }}';
+      settingsForm.recipient_emails.value = option.dataset.emails || '';
+      settingsForm.webhook_url.value = option.dataset.webhook || '';
+      document.querySelector('#settings-error').textContent = '';
+    }
+    function openAlertFor(monitorId, mode) {
+      showAlertEditor(mode);
+      if (!alertSelect) return;
+      alertSelect.value = String(monitorId);
+      fillAlertForm(alertSelect.selectedOptions[0]);
+    }
+    document.querySelector('#add-alert').addEventListener('click', () => {
+      showAlertEditor('add');
+      if (alertSelect) alertSelect.value = '';
+      fillAlertForm(null);
+    });
+    document.querySelectorAll('[data-edit-alert]').forEach(button => button.addEventListener('click', () => {
+      openAlertFor(button.dataset.editAlert, 'edit');
+    }));
+    document.querySelector('#alert-back').addEventListener('click', showAlertList);
+    document.querySelector('#alert-cancel').addEventListener('click', showAlertList);
+    if (alertSelect) {
+      const createdId = sessionStorage.getItem('openAlertEditor');
+      if (createdId && alertSelect.querySelector(`option[value="${createdId}"]`)) {
+        sessionStorage.removeItem('openAlertEditor');
+        openAlertFor(createdId, 'add');
+      }
+      alertSelect.addEventListener('change', () => fillAlertForm(alertSelect.selectedOptions[0]));
+    }
+    settingsForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const monitorId = alertSelect ? Number(alertSelect.value) : 0;
+      const errorNode = document.querySelector('#settings-error');
+      errorNode.textContent = '';
+      if (!monitorId) { errorNode.textContent = 'Create or choose a certificate first.'; return; }
+      const form = new FormData(event.currentTarget);
+      const emails = String(form.get('recipient_emails') || '').split(',').map(email => email.trim()).filter(Boolean);
+      const webhook = String(form.get('webhook_url') || '').trim();
+      const payload = {
+        monitor_id: monitorId,
+        alert_enabled: form.get('alert_enabled') === 'on',
+        expiration_threshold_days: Number(form.get('expiration_threshold_days')),
+        recipient_emails: emails,
+        webhook_url: webhook || null
+      };
+      const response = await fetch('/api/v1/alert-config', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        errorNode.textContent = errorText(data);
+        return;
+      }
+      sessionStorage.removeItem('openAlertEditor');
+      window.location.hash = '#alerts';
+      window.location.reload();
+    });
   </script>
 </body>
 </html>

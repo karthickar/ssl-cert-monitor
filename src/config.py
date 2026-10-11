@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     check_interval_hours: int = Field(default=24, ge=1, le=168)
     disable_scheduler: bool = False
     auth_allow_dev_login: bool = False
+    default_monitor_owner: str = "devops"
 
     @property
     def resolved_database_url(self) -> str:

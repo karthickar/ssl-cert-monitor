@@ -16,6 +16,7 @@ from src.api.routes import router
 from src.auth import get_optional_user
 from src.config import get_settings
 from src.database import Base, engine, get_db
+from src.libutil.geo import detect_country
 from src.models import Monitor, User
 from src.services.monitoring import can_manage_monitor, get_alert_config, recipient_emails
 
@@ -35,6 +36,14 @@ def ensure_database_schema() -> None:
             connection.execute(text("ALTER TABLE monitors ADD COLUMN alert_enabled BOOLEAN NOT NULL DEFAULT 1"))
         if "owner_id" not in existing_columns:
             connection.execute(text("ALTER TABLE monitors ADD COLUMN owner_id INTEGER"))
+        if "alert_threshold_days" not in existing_columns:
+            connection.execute(text("ALTER TABLE monitors ADD COLUMN alert_threshold_days INTEGER"))
+        if "alert_recipient_emails" not in existing_columns:
+            connection.execute(text("ALTER TABLE monitors ADD COLUMN alert_recipient_emails TEXT NOT NULL DEFAULT ''"))
+        if "alert_webhook_url" not in existing_columns:
+            connection.execute(text("ALTER TABLE monitors ADD COLUMN alert_webhook_url VARCHAR(2048)"))
+        if "last_alerted_days" not in existing_columns:
+            connection.execute(text("ALTER TABLE monitors ADD COLUMN last_alerted_days INTEGER"))
     alert_columns = {column["name"] for column in inspect(engine).get_columns("alert_config")}
     if "recipient_emails" not in alert_columns:
         with engine.begin() as connection:
@@ -98,6 +107,8 @@ def dashboard(request: Request, db: Session = Depends(get_db), user: User | None
         "dev_login_enabled": settings.auth_allow_dev_login,
         "check_interval_hours": settings.check_interval_hours,
         "can_manage_monitor": can_manage_monitor,
+        "default_owner": settings.default_monitor_owner,
+        "detected_country": detect_country(request),
     })
 
 

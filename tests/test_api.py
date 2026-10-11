@@ -19,24 +19,13 @@ from fastapi.testclient import TestClient  # noqa: E402
 from src.database import SessionLocal  # noqa: E402
 from src.main import app  # noqa: E402
 from src.models import Monitor  # noqa: E402
-from src.services.monitoring import check_all_monitors  # noqa: E402
+from src.services.monitoring import check_all_monitors, should_send_expiry_alert  # noqa: E402
 
 
 client = TestClient(app)
 
 
-def _sign_out():
-    client.cookies.clear()
-
-
-def _sign_in(email: str = "tester@gmail.com", name: str = "Tester"):
-    _sign_out()
-    response = client.post("/auth/dev-login", json={"email": email, "name": name})
-    assert response.status_code == 200
-    return response.json()
-
-
-def _sample_certificate_bytes() -> bytes:
+def _sample_certificate_bytes(days_valid: int = 30) -> bytes:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test.example")])
     certificate = (
@@ -46,7 +35,7 @@ def _sample_certificate_bytes() -> bytes:
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.now(UTC) - timedelta(days=1))
-        .not_valid_after(datetime.now(UTC) + timedelta(days=30))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=days_valid))
         .sign(key, hashes.SHA256())
     )
     return certificate.public_bytes(serialization.Encoding.PEM)
@@ -54,20 +43,32 @@ def _sample_certificate_bytes() -> bytes:
 
 def test_health_and_alert_configuration():
     with client:
-        _sign_out()
         assert client.get("/health").json() == {"status": "ok"}
-        assert client.put("/api/v1/alert-config", json={"expiration_threshold_days": 14}).status_code == 401
-        _sign_in()
-        initial = client.get("/api/v1/alert-config")
-        assert initial.status_code == 200
-        changed = client.put("/api/v1/alert-config", json={"expiration_threshold_days": 14})
+        missing = client.put("/api/v1/alert-config", json={"expiration_threshold_days": 14})
+        assert missing.status_code == 422
+        created = client.post("/api/v1/monitors/certificate", params={"name": "Alert cert"},
+                              files={"certificate": ("cert.pem", _sample_certificate_bytes(), "application/x-pem-file")})
+        assert created.status_code == 201
+        changed = client.put("/api/v1/alert-config", json={
+            "monitor_id": created.json()["id"],
+            "alert_enabled": True,
+            "expiration_threshold_days": 14,
+        })
         assert changed.status_code == 200
         assert changed.json()["expiration_threshold_days"] == 14
+        assert changed.json()["monitor_id"] == created.json()["id"]
+        assert changed.json()["alert_enabled"] is True
+        db = SessionLocal()
+        stored = db.get(Monitor, created.json()["id"])
+        assert stored.alert_enabled is True
+        assert stored.alert_threshold_days == 14
+        assert stored.hostname is None
+        assert stored.certificate_pem
+        db.close()
 
 
 def test_url_validation_and_listing():
     with client:
-        _sign_in()
         bad = client.post("/api/v1/monitors/url", json={"name": "invalid", "url": "http://example.com"})
         assert bad.status_code == 422
         monitors = client.get("/api/v1/monitors")
@@ -75,33 +76,25 @@ def test_url_validation_and_listing():
         assert isinstance(monitors.json(), list)
 
 
-def test_login_required_for_mutations_and_owner_can_delete():
+def test_operations_work_without_login_and_use_devops_owner():
     with client:
-        _sign_out()
-        create = client.post("/api/v1/monitors/url", json={"name": "Example", "url": "https://example.com"})
-        assert create.status_code == 401
-        owner = _sign_in("owner@gmail.com", "Owner")
-        created = client.post("/api/v1/monitors/certificate", params={"name": "Office cert"},
-                              files={"certificate": ("cert.pem", _sample_certificate_bytes(), "application/x-pem-file")})
+        created = client.post(
+            "/api/v1/monitors/certificate",
+            params={"name": "Office cert"},
+            headers={"cf-ipcountry": "AE"},
+            files={"certificate": ("cert.pem", _sample_certificate_bytes(), "application/x-pem-file")},
+        )
         assert created.status_code == 201
-        monitor_id = created.json()["id"]
-        assert created.json()["owner_email"] == owner["email"]
-        assert created.json()["can_manage"] is True
-        assert created.json()["days_remaining"] is not None
-        client.get("/auth/logout")
-        other = client.post("/auth/dev-login", json={"email": "other@gmail.com", "name": "Other"})
-        assert other.status_code == 200
-        forbidden = client.delete(f"/api/v1/monitors/{monitor_id}")
-        assert forbidden.status_code == 403
-        client.get("/auth/logout")
-        _sign_in("owner@gmail.com", "Owner")
-        removed = client.delete(f"/api/v1/monitors/{monitor_id}")
+        body = created.json()
+        assert body["owner_email"] == "devops"
+        assert body["location"] == "United Arab Emirates"
+        assert body["can_manage"] is True
+        removed = client.delete(f"/api/v1/monitors/{body['id']}")
         assert removed.status_code == 204
 
 
 def test_daily_refresh_updates_validity():
     with client:
-        _sign_in()
         created = client.post("/api/v1/monitors/certificate", params={"name": "Refresh me"},
                               files={"certificate": ("cert.pem", _sample_certificate_bytes(), "application/x-pem-file")})
         assert created.status_code == 201
@@ -116,3 +109,55 @@ def test_daily_refresh_updates_validity():
         refreshed = client.get(f"/api/v1/monitors/{monitor_id}").json()
         assert refreshed["days_remaining"] != 999
         assert refreshed["status"] in {"healthy", "expiring_soon", "expired"}
+
+
+def test_dashboard_shows_remove_and_optional_gmail():
+    with client:
+        page = client.get("/ssl", headers={"cf-ipcountry": "AE"})
+        assert page.status_code == 200
+        assert "Sign in with Gmail" in page.text
+        assert "Remove" in page.text
+        assert "devops" in page.text
+        assert "United Arab Emirates" in page.text
+        assert "Add a new alerting" in page.text
+        assert "No alerts yet" in page.text or "Edit" in page.text
+
+
+def test_check_sends_email_and_webhook_at_seven_days(monkeypatch):
+    sent = {}
+
+    def fake_send(webhook, emails, payload):
+        sent["webhook"] = webhook
+        sent["emails"] = emails
+        sent["payload"] = payload
+        return {"webhook": True, "email": True}
+
+    monkeypatch.setattr("src.services.monitoring.send_alerts", fake_send)
+    with client:
+        created = client.post(
+            "/api/v1/monitors/certificate",
+            params={"name": "Soon", "alert_enabled": "false"},
+            files={"certificate": ("cert.pem", _sample_certificate_bytes(8), "application/x-pem-file")},
+        )
+        assert created.status_code == 201
+        saved = client.put("/api/v1/alert-config", json={
+            "monitor_id": created.json()["id"],
+            "alert_enabled": True,
+            "expiration_threshold_days": created.json()["days_remaining"],
+            "recipient_emails": ["ops@example.com"],
+            "webhook_url": "https://hooks.example.com/ssl",
+        })
+        assert saved.status_code == 200
+        assert sent["emails"] == ["ops@example.com"]
+        assert sent["webhook"] == "https://hooks.example.com/ssl"
+        assert sent["payload"]["days_remaining"] == created.json()["days_remaining"]
+        assert sent["payload"]["alert_threshold_days"] == created.json()["days_remaining"]
+
+
+def test_alerts_fire_at_threshold_seven_and_one_day():
+    assert should_send_expiry_alert(14, 14, None) is True
+    assert should_send_expiry_alert(14, 14, 14) is False
+    assert should_send_expiry_alert(7, 14, 14) is True
+    assert should_send_expiry_alert(1, 14, 7) is True
+    assert should_send_expiry_alert(10, 14, None) is False
+    assert should_send_expiry_alert(-1, 14, None) is True

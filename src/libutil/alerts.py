@@ -53,8 +53,12 @@ def send_email_alert(recipient_emails: list[str], payload: dict) -> bool:
 
 
 def send_alerts(webhook_url: str | None, recipient_emails: list[str], payload: dict) -> dict[str, bool]:
-    """Deliver the same alert to every configured destination."""
-    return {
-        "webhook": send_webhook_alert(webhook_url, payload) if webhook_url else False,
-        "email": send_email_alert(recipient_emails, payload),
-    }
+    """Send the same payload to the webhook and email recipients whenever they are configured."""
+    delivered = {"webhook": False, "email": False}
+    if webhook_url:
+        delivered["webhook"] = send_webhook_alert(webhook_url, payload)
+    if recipient_emails:
+        delivered["email"] = send_email_alert(recipient_emails, payload)
+    if not webhook_url and not recipient_emails:
+        logger.warning("SSL certificate alert has no webhook or email recipients: %s", payload)
+    return delivered

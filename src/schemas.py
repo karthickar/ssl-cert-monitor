@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class URLMonitorCreate(BaseModel):
@@ -9,7 +9,7 @@ class URLMonitorCreate(BaseModel):
     url: str = Field(min_length=1, max_length=2048, description="HTTPS URL or hostname")
     port: int | None = Field(default=None, ge=1, le=65535)
     location: str | None = Field(default=None, max_length=160)
-    alert_enabled: bool = True
+    alert_enabled: bool = False
 
 
 class MonitorResponse(BaseModel):
@@ -20,6 +20,9 @@ class MonitorResponse(BaseModel):
     port: int | None
     location: str | None
     alert_enabled: bool
+    alert_threshold_days: int | None = None
+    alert_recipient_emails: str = ""
+    alert_webhook_url: str | None = None
     status: str
     last_error: str | None
     subject: str | None
@@ -51,9 +54,23 @@ class DevLoginRequest(BaseModel):
 
 
 class AlertConfigUpdate(BaseModel):
+    monitor_id: int
+    alert_enabled: bool = True
     expiration_threshold_days: int = Field(ge=1, le=365)
-    webhook_url: HttpUrl | None = None
+    webhook_url: str | None = Field(default=None, max_length=2048)
     recipient_emails: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        url = value.strip()
+        if not url:
+            return None
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("Webhook URL must start with http:// or https://")
+        return url
 
     @field_validator("recipient_emails")
     @classmethod
@@ -72,6 +89,8 @@ class MonitorAlertUpdate(BaseModel):
 
 
 class AlertConfigResponse(BaseModel):
+    monitor_id: int | None = None
+    alert_enabled: bool | None = None
     expiration_threshold_days: int
     webhook_url: str | None
     recipient_emails: list[str]

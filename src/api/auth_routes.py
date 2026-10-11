@@ -32,7 +32,7 @@ def google_oauth_configured() -> bool:
 @router.get("/auth/google")
 async def login_with_google(request: Request):
     if not google_oauth_configured():
-        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+        return RedirectResponse(url="/ssl#account", status_code=302)
     redirect_uri = settings.oauth_redirect_url or str(request.url_for("auth_google_callback"))
     return await oauth.google.authorize_redirect(request, redirect_uri)
 

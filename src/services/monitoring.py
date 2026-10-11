@@ -29,6 +29,23 @@ def recipient_emails(config: AlertConfig) -> list[str]:
     return [email for email in config.recipient_emails.split(",") if email]
 
 
+def alert_milestones(threshold: int | None) -> set[int]:
+    """Notify when remaining days match the saved threshold, plus 7 days and 1 day before expiry."""
+    points = {1, 7}
+    if threshold and threshold > 0:
+        points.add(threshold)
+    return points
+
+
+def should_send_expiry_alert(days_remaining: int, threshold: int | None, last_alerted_days: int | None) -> bool:
+    """Send once for each milestone: configured threshold, 7 days, and 1 day remaining."""
+    if days_remaining < 0:
+        return last_alerted_days != -1
+    if days_remaining in alert_milestones(threshold):
+        return last_alerted_days != days_remaining
+    return False
+
+
 def _apply_details(monitor: Monitor, details: CertificateDetails) -> None:
     monitor.subject = details.subject
     monitor.issuer = details.issuer
@@ -49,17 +66,31 @@ def check_monitor(db: Session, monitor: Monitor) -> Monitor:
         else:
             _, details = inspect_pem_certificate((monitor.certificate_pem or "").encode())
         _apply_details(monitor, details)
-        config = get_alert_config(db)
-        if monitor.alert_enabled and details.days_remaining <= config.expiration_threshold_days:
+        threshold = monitor.alert_threshold_days or get_alert_config(db).expiration_threshold_days
+        if details.days_remaining <= threshold:
             monitor.status = "expiring_soon" if details.days_remaining >= 0 else "expired"
-            send_alerts(config.webhook_url, recipient_emails(config), {
+        if monitor.alert_enabled and should_send_expiry_alert(details.days_remaining, threshold, monitor.last_alerted_days):
+            emails = [email for email in (monitor.alert_recipient_emails or "").split(",") if email]
+            webhook = monitor.alert_webhook_url
+            if not emails or not webhook:
+                fallback = get_alert_config(db)
+                emails = emails or recipient_emails(fallback)
+                webhook = webhook or fallback.webhook_url
+            payload = {
                 "event": "certificate_expiring",
                 "monitor_id": monitor.id,
                 "name": monitor.name,
                 "hostname": monitor.hostname,
+                "kind": monitor.kind,
                 "expires_at": details.expires_at.isoformat(),
                 "days_remaining": details.days_remaining,
-            })
+                "alert_threshold_days": threshold,
+                "validity_days": details.days_remaining,
+            }
+            delivered = send_alerts(webhook, emails, payload)
+            monitor.last_alerted_days = -1 if details.days_remaining < 0 else details.days_remaining
+            logger.info("Expiry alert sent for monitor %s at %s days remaining (email=%s webhook=%s)",
+                        monitor.id, details.days_remaining, delivered["email"], delivered["webhook"])
     except (OSError, ValueError, ssl.SSLError) as error:  # type: ignore[name-defined]
         logger.info("Certificate check failed for monitor %s: %s", monitor.id, error)
         monitor.status = "error"
@@ -85,13 +116,11 @@ def check_all_monitors() -> int:
 
 
 def can_manage_monitor(monitor: Monitor, user: User | None) -> bool:
-    if user is None:
-        return False
-    return monitor.owner_id is None or monitor.owner_id == user.id
+    return True
 
 
 def serialize_monitor(monitor: Monitor, user: User | None = None) -> MonitorResponse:
     return MonitorResponse.model_validate(monitor).model_copy(update={
-        "owner_email": monitor.owner.email if monitor.owner else None,
-        "can_manage": can_manage_monitor(monitor, user),
+        "owner_email": get_settings().default_monitor_owner,
+        "can_manage": True,
     })
